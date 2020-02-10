@@ -181,14 +181,15 @@ Definition env_generator (f: StateT -> ActionT -> StateT) : itree rlE unit :=
   ) tt.
 
 Lemma is_trace_rl_split: forall s a s' tr,
+    is_rltrace tr ->
     is_trace safe_env (bind_rl_trace (s, a, s') tr) ->
     (is_trace safe_env tr) /\ is_trace safe_env (ret_rl_trace (s, a, s')).
 Proof.
-  intros. cbn in H. unfold safe_env, is_trace in H.
+  intros. cbn in H0. unfold safe_env, is_trace in H0.
   destruct s.
   - destruct a.
     do 5 auto_inv_is_trace. split.
-    cbn in H3.
+    cbn in H4.
     unfold safe_env. unfold rec_fix. unfold rec.
     match goal with
     | H : is_traceF (TauF (interp_mrec (calling' ?a) _)) _ |- _ => remember a as callf
@@ -235,14 +236,14 @@ Proof.
       apply is_trace_rl_split in H3.
       destruct H3.
       apply safe_inductive_invariant in H0; auto. omega.
-      apply safe_inductive_invariant in H1; auto.
+      apply safe_inductive_invariant in H1; auto. constructor.
     + destruct x1, x2, p, p0. inversion H. subst.
       apply IHis_rltrace; clear IHis_rltrace. 
       * constructor. inv_is_trace H1. inv_is_trace H8. auto.
       * constructor. inv_is_trace H0.
         apply is_trace_rl_split in H3.
-        destruct H3. apply safe_inductive_invariant in H3; auto.
+        destruct H3. apply safe_inductive_invariant in H3; auto. apply H4.
       * inv_is_trace H0.
         apply is_trace_rl_split in H3.
-        destruct H3. auto.
+        destruct H3; auto. apply H4.
 Qed.

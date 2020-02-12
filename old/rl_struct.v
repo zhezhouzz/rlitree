@@ -17,6 +17,7 @@ Import ITreeNotations.
 Import MonadNotation.
 Open Scope monad_scope.
 
+
 (* * Idea * *)
 (* An environment is an transition system over state space and action space. An deterministic environment has type "State * Action -> State" and an agent policy has type "State -> Action". Now represent an environment as an itree and agent policy as effect. *)
 
@@ -197,6 +198,10 @@ Proof.
     match goal with
     | _ : _ |- is_trace (mrec (calling' ?b) _) _ => remember b as callf'
     end.
+    assert (callf = callf'). {
+            subst. reflexivity. 
+    }
+    subst.
 Admitted.
 
 (* The following safe lemma can be proved by the inductive invariant. *)

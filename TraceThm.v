@@ -80,6 +80,8 @@ Inductive is_rltrace {StateT ActionT : Type} : @trace (@rlE StateT ActionT) unit
     is_rltrace (cons_rl_trace x2 tr) ->
     is_rltrace (cons_rl_trace x1 (cons_rl_trace x2 tr)).
 
+(* inj_pair2_dec *)
+
 Ltac inj_dep_pair :=
   match goal with
   | [H : existT _ _ _ = existT _ _ _ |- _] => (apply (Eqdep.EqdepTheory.inj_pair2 Type) in H; subst)
@@ -98,36 +100,20 @@ Ltac inv_dep H := inversion H; try inj_dep_pair_all; try clear_id; try clear H.
 
 (* inversion lemma for is_trace *)
 
-Lemma inv_trigger_input_s {StateT ActionT : Type}: forall k s (tr: @trace (@rlE StateT ActionT) unit),
-    is_trace (ITree.bind (ITree.trigger InputS) k) ([InputS, s] tr) <-> is_trace (k s) tr.
+Lemma inv_trigger : forall (E : Type -> Type) (R T: Type), forall (k : T -> _) e1 e2 s (tr: @trace E R),
+    is_trace (ITree.bind (ITree.trigger e1) k) ([e2, s] tr) <-> e1 = e2 /\ is_trace (k s) tr.
 Proof.
   split; intros.
   - repeat setoid_rewrite bind_trigger in H. inv_is_trace H. auto.
-  - unfold is_trace, observe. cbn. constructor. auto.
+  - unfold is_trace, observe. cbn. destruct H. subst. constructor. auto.
 Qed.
 
-Lemma inv_trigger_input_a {StateT ActionT : Type} : forall k a (tr: @trace (@rlE StateT ActionT) unit),
-    is_trace (ITree.bind (ITree.trigger InputA) k) ([InputA, a] tr) <-> is_trace (k a) tr.
+Lemma inv_trigger_2 {E : Type -> Type} {R T: Type}: forall (k : T -> _) (e1 e2: E T),
+    @is_trace E R (ITree.bind (ITree.trigger e1) k) ([<e2>]) <-> e1 = e2.
 Proof.
   split; intros.
   - repeat setoid_rewrite bind_trigger in H. inv_is_trace H. auto.
-  - unfold is_trace, observe. cbn. constructor. auto.
-Qed.
-
-Lemma inv_trigger_output_s {StateT ActionT : Type} : forall k s s' (tr: @trace (@rlE StateT ActionT) unit),
-    is_trace (ITree.trigger (OutputS s);; k tt) ([OutputS s', tt] tr) <-> s = s' /\ is_trace (k tt) tr.
-Proof.
-  split; intros.
-  - repeat setoid_rewrite bind_trigger in H. inv_is_trace H. split; auto. inversion H2; auto.
-  - destruct H. unfold is_trace, observe. cbn. rewrite H. constructor. auto.
-Qed.
-
-Lemma inv_trigger_output_s_2 {StateT ActionT : Type} : forall (t : itree (@rlE StateT ActionT) unit) s s',
-    is_trace (ITree.trigger (OutputS s);; t) ([<OutputS s'>]) <-> s = s'.
-Proof.
-  split; intros.
-  - repeat setoid_rewrite bind_trigger in H. inv_is_trace H. inversion H2; auto.
-  - destruct H. unfold is_trace, observe. cbn. constructor.
+  - unfold is_trace, observe. cbn. destruct H. subst. constructor.
 Qed.
 
 (* Environment *)
@@ -139,6 +125,8 @@ Qed.
 (*   4) rewrite the new state, i.e. "s'". *)
 (*   5) go back to step 1. *)
 
+(* be notation *)
+
 Definition trigger_inr1 {D E : Type -> Type} : E ~> itree (D +' E)
   := fun _ e => ITree.trigger (inr1 e).
 Arguments trigger_inr1 {D E} [T].
@@ -147,8 +135,8 @@ Definition env_generator {StateT ActionT : Type} (f: StateT -> ActionT -> StateT
   (rec-fix env_ _ :=
      state <- trigger_inr1 InputS ;; (* read current state *)
            action <- trigger_inr1 InputA ;; (* read action from agent *)
-           trigger_inr1 (OutputS (f state action)) ;; (* write new state *)
-           env_ tt
+           t <- trigger_inr1 (OutputS (f state action)) ;; (* write new state *)
+           env_ t
   ) tt.
 
 (* step is one step of an rl environment recursion. *)
@@ -156,24 +144,35 @@ Definition env_generator {StateT ActionT : Type} (f: StateT -> ActionT -> StateT
 Definition step_generator {StateT ActionT : Type} (f: StateT -> ActionT -> StateT) : itree (@rlE StateT ActionT) unit :=
   state <- ITree.trigger InputS ;; (* read current state *)
         action <- ITree.trigger InputA ;; (* read action from agent *)
-        ITree.trigger (OutputS (f state action)) ;; (* write new state *)
-        Ret tt.
+        t <- ITree.trigger (OutputS (f state action)) ;; (* write new state *)
+        Ret t.
+
+Hint Resolve inv_trigger.
+Hint Rewrite inv_trigger.
+Hint Resolve inv_trigger_2.
+
+Ltac is_trace_autoinv :=
+  repeat match goal with
+         | H : is_trace _ (TEventEnd ?a) |- _ => cbn in H; try (rewrite inv_trigger_2 in H)
+         | H : is_trace _ _ |- _ => cbn in H; try (rewrite inv_trigger in H)
+         | H : _ /\ _ |- _ => destruct H
+         end.
+
+Ltac is_trace_auto :=
+  repeat match goal with
+         | H : _ |- is_trace _ (TEventEnd ?a) => cbn; try (rewrite inv_trigger_2)
+         | H : _ |- is_trace _ _ => cbn; try (rewrite inv_trigger)
+         | H : _ |- _ /\ _ => split; subst; auto
+         end.
 
 Lemma is_trace_bodyf {StateT ActionT : Type} : forall (s s': StateT) (a: ActionT) bodyf,
     is_trace (step_generator bodyf) (nil_rl_trace (s, a, s')) <->
     bodyf s a = s'.
 Proof.
-  split; intros.
-  - unfold step_generator in H. cbn in H.
-    rewrite inv_trigger_input_s in H.
-    rewrite inv_trigger_input_a in H.
-    rewrite inv_trigger_output_s_2 in H.
-    auto.
-  - unfold step_generator. cbn.
-    rewrite inv_trigger_input_s.
-    rewrite inv_trigger_input_a.
-    rewrite inv_trigger_output_s_2.
-    auto.
+  unfold step_generator; split; intros.
+  - is_trace_autoinv.
+    inversion H1. auto.
+  - is_trace_auto. auto.
 Qed.
 
 Lemma is_trace_rec_to_step {StateT ActionT : Type} : forall (s s': StateT) (a: ActionT) bodyf,
@@ -187,10 +186,8 @@ Proof.
     end.
     repeat setoid_rewrite interp_bind in H.
     repeat setoid_rewrite interp_trigger in H.
-    cbn in H.
-    rewrite inv_trigger_input_s in H.
-    rewrite inv_trigger_input_a in H.
-    rewrite inv_trigger_output_s_2 in H.
+    is_trace_autoinv.
+    inversion H1.
     rewrite is_trace_bodyf. auto.
   - rewrite is_trace_bodyf in H.
     unfold env_generator. cbn.
@@ -200,11 +197,7 @@ Proof.
     end.
     repeat setoid_rewrite interp_bind.
     repeat setoid_rewrite interp_trigger.
-    cbn.
-    rewrite inv_trigger_input_s.
-    rewrite inv_trigger_input_a.
-    rewrite inv_trigger_output_s_2.
-    auto.
+    is_trace_auto. auto.
 Qed.
 
 Lemma is_trace_rl_split {StateT ActionT: Type}: forall s a s' (tr: @trace (@rlE StateT ActionT) unit) bodyf,
@@ -219,17 +212,15 @@ Proof.
   end.
   repeat setoid_rewrite interp_bind in H.
   repeat setoid_rewrite interp_trigger in H.
-  cbn in H.
-  rewrite inv_trigger_input_s in H.
-  rewrite inv_trigger_input_a in H.
-  rewrite inv_trigger_output_s in H.
-  destruct H. split.
+  is_trace_autoinv.
+  split.
   - unfold env_generator.
     unfold rec_fix.
     rewrite <- Heqbody.
     auto.
   - rewrite is_trace_rec_to_step.
     rewrite is_trace_bodyf.
+    inversion H1.
     auto.
 Qed.
 

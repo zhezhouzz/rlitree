@@ -66,43 +66,25 @@ Definition trace_fall := fun tr => @trace_end StateT ActionT (fun s' => s' = 4) 
 (* The following safe lemma can be proved by the inductive invariant. *)
 
 Lemma safe: forall (tr: @trace rlE unit),
-    is_rltrace tr ->
+    @state_trace StateT actionE tr ->
     trace_from_safe tr ->
     trace_fall tr ->
     not (is_trace safe_env tr).
 Proof.
   unfold not, trace_from_safe, trace_fall.
-  intros. cbn in H0. unfold safe_env in H2.
-  induction H.
-  - destruct x, p.
-    rewrite is_trace_rec_to_step in H2.
-    rewrite is_trace_bodyf in H2.
-    rewrite inv_nil_trace_init in H0.
-    rewrite inv_nil_trace_end in H1.
-    apply safe_inductive_invariant in H2; auto.
-    subst. lia.
-  - destruct x1, x2, p, p0.
-    rewrite inv_cons_trace_init in H0.
-    rewrite inv_cons_trace_end in H1.
-    rewrite inv_nil_trace_end in H1.
-    inversion H. clear H.
-    apply is_trace_rl_split in H2.
-    destruct H2.
-    rewrite is_trace_rec_to_step in H.
-    rewrite is_trace_rec_to_step in H2.
-    rewrite is_trace_bodyf in H.
-    rewrite is_trace_bodyf in H2.
-    apply safe_inductive_invariant in H2; auto. subst.
-    apply safe_inductive_invariant in H; auto. lia.
-  - destruct x1, x2, p, p0.
-    rewrite inv_cons_trace_init in H0.
-    rewrite inv_cons_trace_end in H1.
-    rewrite inv_cons_trace_end in H1.
-    inversion H. clear H. subst.
-    apply is_trace_rl_split in H2.
-    rewrite is_trace_rec_to_step in H2.
-    rewrite is_trace_bodyf in H2.
-    destruct H2.
-    apply IHis_rltrace; clear IHis_rltrace; auto.
-    * rewrite inv_cons_trace_init. apply safe_inductive_invariant in H2; auto.
+  intros. unfold safe_env, env_generator in H2.
+  apply env_trace_is_step_trace in H2.
+  remember safe_env_body as z.
+  induction H2; try inv_trace_end; try inv_trace_init.
+  - apply safe_inductive_invariant in H4; auto. lia.
+  - apply IHstep_trace; auto.
+    + do 3 (apply decrease_state_trace in H). auto.
+    + remember (safe_env_body s a) as z.
+      assert (z <= 3).
+      rewrite Heqz. apply safe_inductive_invariant with s a; auto.
+      * do 2 (apply decrease_state_trace in H).
+        inv_dep H; try inv_trace_end; auto.
+        constructor; auto.
+        inversion H2.
+        inversion H2.
 Qed.

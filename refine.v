@@ -28,15 +28,52 @@ Definition safe {S A: Type} (env: itree rlE unit) (init: S -> Prop) (phi: S -> P
     @trace_end S A phi tr ->
     not (is_trace env tr).
 
+(* The safety proof := iv + init -> iv -> not phi. *)
+
 Inductive safety_package {S A: Type} : (EnvF S A) -> (S -> Prop) -> (S -> Prop) -> (S -> Prop) -> Prop :=
 | SafetyPackage: forall (envf:EnvF S A) (init phi iv: S -> Prop),
     inductive_invariant iv envf ->
     (forall s: S, (init s -> iv s) /\ (iv s -> not (phi s))) ->
     safety_package envf init phi iv.
 
+(* A safety package can rebuild a proof. *)
+
 Definition auto_safety_proof {S A: Type} (envf: EnvF S A) (init: S -> Prop) (phi: S -> Prop) (iv: S -> Prop):
            safety_package envf init phi iv -> safe (env_generator envf) init phi.
-Proof. Admitted.
+Proof.
+  assert (safety_package envf init phi iv -> safe (env_generator envf) iv phi).
+  {
+  intros.
+  inversion H; subst. clear H.
+  unfold safe, env_generator. intros.
+  unfold not. intros.
+  apply env_trace_is_step_trace in H4.
+  induction H4; try inv_trace_end; try inv_trace_init.
+  - remember (H1 s). clear Heqa1. destruct a1. clear H3.
+    apply (H0 s a (f s a)) in H5; auto.
+    remember (H1 (f s a)). clear Heqa1. destruct a1.
+    apply H4; auto.
+  - apply IHstep_trace; auto.
+    + do 3 (apply decrease_state_trace in H). auto.
+    + assert (iv (f s a)).
+      destruct (H1 s). apply H0 with s a; auto.
+      do 2 (apply decrease_state_trace in H).
+      inv_dep H; try inv_trace_end; auto.
+      * constructor; auto.
+      * inversion H4.
+      * inversion H4.
+  }
+  intros.
+  inversion H0; subst.
+  clear H1.
+  apply H in H0. clear H.
+  unfold safe. unfold safe in H0.
+  intros.
+  apply H0; auto.
+  clear H0. clear H. clear H3.
+  induction H1.
+  - constructor. destruct (H2 s). auto.
+Qed.        
 
 (* Mountain Car *)
 
@@ -44,6 +81,7 @@ Definition StateT := prod Q Q.
 
 Inductive ActionT : Type :=
 | Left
+| NoAction
 | Right.
 
 Definition force := 1#1000.
@@ -59,6 +97,7 @@ Definition mountaincar_env_body : EnvF StateT ActionT :=
     let acc :=
         match action with
         | Left => - force
+        | NoAction => 0
         | Right => force
         end in
     match state with
@@ -107,7 +146,6 @@ Definition StateT1 := prod Q Q.
 
 Inductive ActionT1 : Type :=
 | Forward
-| NoAction
 | Backward.
 
 Definition road_init (s: StateT1) :=
@@ -121,7 +159,6 @@ Definition road_env_body : EnvF StateT1 ActionT1 :=
     let acc :=
         match action with
         | Forward => - force
-        | NoAction => 0
         | Backward => force
         end in
     match state with
@@ -163,6 +200,7 @@ Definition StateT2 := prod (prod Q Q) (prod Q Q).
 Inductive ActionT2 : Type :=
 | GoLeft
 | GoRight
+| GoNoAction
 | GoForward
 | GoBackward.
 
@@ -172,6 +210,7 @@ Definition twoDroad_env_body : EnvF StateT2 ActionT2 :=
         match action with
         | GoLeft => (0, -force)
         | GoRight => (0, force)
+        | GoNoAction => (0, 0)
         | GoForward => (force, 0)
         | GoBackward => (-force, 0)
         end in
@@ -209,38 +248,25 @@ Proof. Admitted.
 Definition state_map (s: StateT) : StateT1 :=
   let (pos, vel) := s in (pos, (1#2)*vel).
 
+(* Is not required to be a injection *)
+
 Definition action_map (a : ActionT) : ActionT1 :=
   match a with
   | Left => Forward
+  | NoAction => Backward
   | Right => Backward
   end.
 
-(* Definition trace_map {S1 S2 A1 A2 R: Type} (smap: S1 -> S2) (amap: A1 -> A2) (tr: @trace (@rlE S1 A1) R): @trace (@rlE S2 A2) R := *)
-(*   (fix _map (tr: @trace (@rlE S1 A1) R) : @trace (@rlE S2 A2) R := *)
-(*   match tr with *)
-(*   | TEnd => TEnd *)
-(*   | TRet r => TRet r *)
-(*   | @TEventEnd _ _ X e => *)
-(*     (match e with *)
-(*      | inl1 GetState => TEventEnd (inl1 GetState) *)
-(*      | inl1 (PutState s) => TEventEnd (inl1 (PutState (smap s))) *)
-(*      | inr1 AgentAction => TEventEnd (inr1 AgentAction) *)
-(*      end) *)
-(*   | @TEventResponse _ _ X e x tr => *)
-(*     (match e with *)
-(*      | inl1 GetState => TEventResponse (inl1 GetState) (smap x) (_map tr) *)
-(*      | inl1 (PutState s) => TEventResponse (inl1 (PutState (smap s))) x (_map tr) *)
-(*      | inr1 AgentAction => TEventResponse (inr1 AgentAction) (amap x) (_map tr) *)
-(*      end) *)
-(*   end) tr. *)
+(* Intuitive definition of refinement *)
 
-(* Map any traces from env1 to the trace from env2. Then if env2 safe, it will implies env1 safe. *)
-
+(* env2 refines env1: *)
 Definition env_refine {S1 S2 A1 A2: Type}
            (env1: itree rlE unit) (env2: itree rlE unit)
            (init1: S1 -> Prop) (init2: S2 -> Prop)
            (phi1: S1 -> Prop) (phi2: S2 -> Prop) :=
   @safe S2 A2 env2 init2 phi2 -> @safe S1 A1 env1 init1 phi1.
+
+(* Refinement should be a relation between two package. *)
 
 Definition package_refine {S1 S2 A1 A2: Type}
            (env1: EnvF S1 A1) (env2: EnvF S2 A2)
@@ -309,11 +335,15 @@ Admitted.
 
 (* Bad refine relation *)
 
+(* Map a small domain to a large co-domain: check if it is a surjection *)
+
+(* state_map2 is not a surjection *)
 Definition state_map2 (s: StateT) : StateT2 := ((0, 0), s).
 
 Definition action_map2 (a : ActionT) : ActionT2 :=
   match a with
   | Left => GoLeft
+  | NoAction => GoNoAction
   | Right => GoRight
   end.
 
